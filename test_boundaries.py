@@ -1,11 +1,12 @@
 import json
+import stat
 import subprocess
 import sys
 from pathlib import Path
 
 import pytest
 
-from substitute import substitution
+from substitute import main, substitution
 
 
 def test_depth_zero_preserves_dictionary_identity_and_values():
@@ -81,3 +82,72 @@ def test_cli_preserves_legacy_depth_argument_and_unicode(tmp_path):
         "name": {"_content": "café", "_type": "<class 'str'>"},
         "nested": {"value": 1},
     }
+
+
+def run_cli(*args):
+    with pytest.raises(SystemExit) as stopped:
+        main([str(arg) for arg in args])
+    return stopped.value.code
+
+
+def test_nan_and_infinity_are_rejected_instead_of_echoed(tmp_path, capsys):
+    source = tmp_path / "input.json"
+    source.write_text('{"a": NaN, "b": Infinity}')
+    output = tmp_path / "output.json"
+    assert run_cli(source, output) == 2
+    assert "NaN is not valid JSON" in capsys.readouterr().err
+    assert not output.exists()
+
+
+def test_utf8_byte_order_mark_is_accepted(tmp_path):
+    source = tmp_path / "input.json"
+    source.write_bytes(b'\xef\xbb\xbf{"a": 1}')
+    output = tmp_path / "output.json"
+    assert main([str(source), str(output)]) == 0
+    assert json.loads(output.read_text()) == {
+        "a": {"_content": 1, "_type": "<class 'int'>"}
+    }
+
+
+def test_parse_errors_name_the_input_file(tmp_path, capsys):
+    source = tmp_path / "broken.json"
+    source.write_text("{broken")
+    assert run_cli(source, tmp_path / "out.json") == 2
+    assert "broken.json: Expecting property name" in capsys.readouterr().err
+
+
+def test_too_deep_input_reports_nesting_not_a_traceback(tmp_path, capsys):
+    source = tmp_path / "deep.json"
+    source.write_text('{"a":' * 100_000 + "1" + "}" * 100_000)
+    assert run_cli(source, tmp_path / "out.json") == 2
+    assert "nested too deeply" in capsys.readouterr().err
+
+
+def test_overwrite_keeps_permissions_and_leaves_no_temp_files(tmp_path):
+    source = tmp_path / "input.json"
+    source.write_text('{"a": 1}')
+    output = tmp_path / "output.json"
+    output.write_text("old")
+    output.chmod(0o640)
+    assert main([str(source), str(output)]) == 0
+    assert stat.S_IMODE(output.stat().st_mode) == 0o640
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["input.json", "output.json"]
+
+
+def test_symlinked_output_updates_the_link_target(tmp_path):
+    source = tmp_path / "input.json"
+    source.write_text('{"a": 1}')
+    real = tmp_path / "real.json"
+    real.write_text("old")
+    link = tmp_path / "link.json"
+    link.symlink_to(real)
+    assert main([str(source), str(link)]) == 0
+    assert link.is_symlink()
+    assert json.loads(real.read_text())["a"]["_content"] == 1
+
+
+def test_missing_output_directory_names_the_output_path(tmp_path, capsys):
+    source = tmp_path / "input.json"
+    source.write_text('{"a": 1}')
+    assert run_cli(source, tmp_path / "nowhere" / "out.json") == 2
+    assert "nowhere/out.json" in capsys.readouterr().err

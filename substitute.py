@@ -2,6 +2,8 @@
 
 import argparse
 import json
+import os
+import tempfile
 
 
 def substitution(dictionary, depth=None, current_depth=0):
@@ -23,6 +25,43 @@ def substitution(dictionary, depth=None, current_depth=0):
         return node
 
     return visit(dictionary, current_depth)
+
+
+def _reject_constant(name):
+    raise ValueError(f"{name} is not valid JSON")
+
+
+def read_json(path):
+    """Parse strict JSON; a UTF-8 byte-order mark is accepted, NaN/Infinity are not."""
+    with open(path, encoding="utf-8-sig") as source:
+        try:
+            return json.load(source, parse_constant=_reject_constant)
+        except ValueError as error:
+            raise ValueError(f"{path}: {error}") from error
+
+
+def write_atomically(path, text):
+    """Replace path in one step, so readers never see a half-written file."""
+    target = os.path.realpath(path)
+    directory = os.path.dirname(target)
+    try:
+        mode = os.stat(target).st_mode & 0o777
+    except FileNotFoundError:
+        umask = os.umask(0)
+        os.umask(umask)
+        mode = 0o666 & ~umask
+    try:
+        fd, temp_path = tempfile.mkstemp(dir=directory, prefix=".substitute-")
+    except OSError as error:
+        raise OSError(error.errno, error.strerror, path) from error
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as destination:
+            destination.write(text)
+        os.chmod(temp_path, mode)
+        os.replace(temp_path, target)
+    except BaseException:
+        os.unlink(temp_path)
+        raise
 
 
 def main(argv=None):
@@ -47,13 +86,13 @@ def main(argv=None):
             parser.error("depth must be a nonnegative integer")
         output = args.output
     try:
-        with open(args.input, encoding="utf-8") as source:
-            result = substitution(json.load(source), depth)
-        # Serialize fully before opening the output so bad input never truncates it.
+        result = substitution(read_json(args.input), depth)
+        # Serialize fully before touching the output so bad input never truncates it.
         rendered = json.dumps(result, ensure_ascii=False, indent=2) + "\n"
-        with open(output, "w", encoding="utf-8") as destination:
-            destination.write(rendered)
-    except (OSError, ValueError, TypeError, RecursionError) as error:
+        write_atomically(output, rendered)
+    except RecursionError:
+        parser.exit(2, f"{parser.prog}: {args.input}: JSON is nested too deeply\n")
+    except (OSError, ValueError, TypeError) as error:
         parser.exit(2, f"{parser.prog}: {error}\n")
     return 0
 
