@@ -9,6 +9,4 @@ from substitute import substitution
 
 def test_substitution(input_dict, depth, expected_output):
     actual_output = substitution(input_dict, depth)
-    print(actual_output)
-    print(expected_output)
     assert actual_output == expected_output
