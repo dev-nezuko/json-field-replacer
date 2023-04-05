@@ -182,3 +182,10 @@ def test_symlinked_output_updates_the_link_target(source, tmp_path):
 def test_missing_output_directory_names_the_output_path(source, tmp_path, capsys):
     assert run_cli(source, tmp_path / "nowhere" / "out.json") == 2
     assert "nowhere/out.json" in capsys.readouterr().err
+
+
+def test_bundled_example_output_matches_a_fresh_run(tmp_path):
+    examples = Path(__file__).resolve().parents[1] / "examples"
+    output = tmp_path / "output.json"
+    assert run_cli(examples / "input.json", output) == 0
+    assert output.read_text() == (examples / "output.json").read_text()
