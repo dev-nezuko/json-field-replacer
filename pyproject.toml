@@ -1,0 +1,35 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "json-field-replacer"
+version = "1.0.0"
+description = "Wrap the leaf values of a JSON object with their original value and Python type name."
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.12"
+dependencies = []
+
+[project.optional-dependencies]
+dev = [
+    "pytest==9.2.0",
+    "hypothesis==6.170.15",
+    "ruff==0.17.4",
+]
+
+[project.scripts]
+substitute = "substitute:main"
+
+[tool.setuptools]
+py-modules = ["substitute"]
+
+[tool.pytest.ini_options]
+addopts = "-ra"
+
+[tool.ruff]
+target-version = "py312"
+line-length = 88
+
+[tool.ruff.lint]
+extend-select = ["E", "W", "I", "B", "UP", "SIM", "PT", "RUF"]
