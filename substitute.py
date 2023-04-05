@@ -4,16 +4,31 @@ import argparse
 import json
 import os
 import tempfile
+from collections.abc import Sequence
+from typing import Any
+
+EPILOG = """\
+examples:
+  %(prog)s input.json result.json            wrap every leaf, at any depth
+  %(prog)s --depth 1 input.json result.json  wrap only the root's leaves
+  %(prog)s input.json 1 result.json          same, original argument order
+
+Depth 0 leaves the object unchanged. Lists are leaves: their items are
+not visited. The output file is replaced only after the whole result has
+been built, so invalid input never truncates it.
+"""
 
 
-def substitution(dictionary, depth=None, current_depth=0):
+def substitution(
+    dictionary: dict[Any, Any], depth: int | None = None, current_depth: int = 0
+) -> dict[Any, Any]:
     """Mutate a dictionary; lists remain leaf values and depth zero is a no-op."""
     if not isinstance(dictionary, dict):
         raise TypeError("The input must be a JSON object.")
     if depth is not None and (type(depth) is not int or depth < 0):
         raise ValueError("depth must be a nonnegative integer or None.")
 
-    def visit(node, level):
+    def visit(node: dict[Any, Any], level: int) -> dict[Any, Any]:
         if depth is not None and level >= depth:
             return node
         for key, value in node.items():
@@ -27,11 +42,11 @@ def substitution(dictionary, depth=None, current_depth=0):
     return visit(dictionary, current_depth)
 
 
-def _reject_constant(name):
+def _reject_constant(name: str) -> None:
     raise ValueError(f"{name} is not valid JSON")
 
 
-def read_json(path):
+def read_json(path: str) -> Any:
     """Parse strict JSON; a UTF-8 byte-order mark is accepted, NaN/Infinity are not."""
     with open(path, encoding="utf-8-sig") as source:
         try:
@@ -40,7 +55,7 @@ def read_json(path):
             raise ValueError(f"{path}: {error}") from error
 
 
-def write_atomically(path, text):
+def write_atomically(path: str, text: str) -> None:
     """Replace path in one step, so readers never see a half-written file."""
     target = os.path.realpath(path)
     directory = os.path.dirname(target)
@@ -64,26 +79,49 @@ def write_atomically(path, text):
         raise
 
 
-def main(argv=None):
+def _depth(text: str) -> int:
+    try:
+        value = int(text)
+    except ValueError:
+        value = -1
+    if value < 0:
+        raise argparse.ArgumentTypeError(f"must be a nonnegative integer, not {text!r}")
+    return value
+
+
+def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
-        description=__doc__, usage="%(prog)s input.json [depth] output.json"
+        description=__doc__,
+        usage="%(prog)s [-h] [--depth N] input.json [N] output.json",
+        epilog=EPILOG,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    parser.add_argument("input", help="Input JSON object file")
+    parser.add_argument(
+        "input", metavar="input.json", help="JSON file whose root is an object"
+    )
     parser.add_argument(
         "depth_or_output",
-        help="Output file, or the maximum depth when a third argument follows",
+        metavar="[N] output.json",
+        help="output file; a leading N is the legacy way to give --depth",
     )
-    parser.add_argument("output", nargs="?", help="Output file when depth is provided")
+    parser.add_argument("output", nargs="?", help=argparse.SUPPRESS)
+    parser.add_argument(
+        "-d",
+        "--depth",
+        type=_depth,
+        metavar="N",
+        help="only wrap leaves in the first N levels of objects (default: all)",
+    )
     args = parser.parse_args(argv)
-    depth = None
+    depth = args.depth
     output = args.depth_or_output
     if args.output is not None:
+        if depth is not None:
+            parser.error("give the depth either as --depth or positionally, not both")
         try:
-            depth = int(args.depth_or_output)
-            if depth < 0:
-                raise ValueError()
-        except ValueError:
-            parser.error("depth must be a nonnegative integer")
+            depth = _depth(args.depth_or_output)
+        except argparse.ArgumentTypeError as error:
+            parser.error(f"depth {error}")
         output = args.output
     try:
         result = substitution(read_json(args.input), depth)

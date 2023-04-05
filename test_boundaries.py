@@ -151,3 +151,36 @@ def test_missing_output_directory_names_the_output_path(tmp_path, capsys):
     source.write_text('{"a": 1}')
     assert run_cli(source, tmp_path / "nowhere" / "out.json") == 2
     assert "nowhere/out.json" in capsys.readouterr().err
+
+
+def test_depth_option_matches_the_legacy_positional_depth(tmp_path):
+    source = tmp_path / "input.json"
+    source.write_text('{"root": 1, "nested": {"value": 2}}')
+    by_option = tmp_path / "option.json"
+    by_position = tmp_path / "position.json"
+    assert main(["--depth", "1", str(source), str(by_option)]) == 0
+    assert main([str(source), "1", str(by_position)]) == 0
+    assert by_option.read_text() == by_position.read_text()
+    assert json.loads(by_option.read_text())["nested"] == {"value": 2}
+
+
+@pytest.mark.parametrize(
+    "args",
+    [
+        ["--depth", "1", "in.json", "2", "out.json"],
+        ["--depth", "-1", "in.json", "out.json"],
+        ["in.json", "x", "out.json"],
+    ],
+)
+def test_bad_depth_arguments_are_usage_errors(args, capsys):
+    assert run_cli(*args) == 2
+    assert "depth" in capsys.readouterr().err
+
+
+def test_help_explains_depth_and_shows_examples(capsys):
+    with pytest.raises(SystemExit) as stopped:
+        main(["--help"])
+    assert stopped.value.code == 0
+    text = capsys.readouterr().out
+    assert "--depth N" in text
+    assert "examples:" in text
