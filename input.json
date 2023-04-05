@@ -1,0 +1,17 @@
+{
+    "name": "John",
+    "age": 30,
+    "address1": {
+      "street": "123 Main St",
+      "city": "Anytown",
+      "state": "CA"
+    },
+    "address2": {
+        "street": "1234 Main St",
+        "cities": {
+            "city1": "Anytown",
+            "city2": "SanAndreas"
+        },
+        "state": "CA"
+      }
+}
